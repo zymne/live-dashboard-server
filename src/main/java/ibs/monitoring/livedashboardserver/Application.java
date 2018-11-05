@@ -28,9 +28,9 @@ public class Application implements CommandLineRunner {
 
 	@Override
 	public void run(String... args) throws Exception {
-//		this.template.send("myTopic", "foo1");
-//		this.template.send("myTopic", "foo2");
-//		this.template.send("myTopic", "foo3");
+//		this.templates.send("myTopic", "foo1");
+//		this.templates.send("myTopic", "foo2");
+//		this.templates.send("myTopic", "foo3");
 //		latch.await(60, TimeUnit.SECONDS);
 //		logger.info("All received");
 	}
