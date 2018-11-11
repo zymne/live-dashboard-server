@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+</head>
+<body>
+<div id="chart_div"></div>
+<script type="text/javascript">
+    google.charts.load('current', {packages: ['corechart', 'bar']});
+    google.charts.setOnLoadCallback(drawBasic);
+
+    function tcpChannelFormatHandler() {}
+
+    function validate(data) {
+        if(data.start == null || data.end == null || data.accepted == null) {
+            return false;
+        }
+
+        return true;        
+    }
+
+    function cleanup() {
+        return {
+            start: null,
+            end: null,            
+            accepted: null,
+            elapsedTime: null,
+            startText: null,
+            tableRow: []
+        };        
+    }
+    /*Данные приходят в обратном порядке - по убыванию, т.е. сначала самые новые*/
+    /*Пример последовательности событий в потоке: 0.endProcessNewConnection, 1.startProcessNewConnection, 2.socketChannelAccepted*/
+    function prepareData(jsonResponse) {
+        var jsonData = JSON.parse(jsonResponse);
+        var data = [];
+        hits = jsonData.hits.hits;
+        var j = 0;
+        var e = cleanup();
+        data.push(['Connection', 'Elapsed time, sec.']);
+        for(var i = 0; i < hits.length; ++i) {
+            var h = hits[i];            
+            var source = h._source;                                    
+            
+            dateText = source["ts"];
+
+            if(source.mytag == "startProcessNewConnection") {                
+                e.start = Date.parse(dateText);
+                e.startText = dateText.substring(11, 19);
+            }
+            else if(source.mytag == "endProcessNewConnection") {                
+                e.end = Date.parse(dateText);
+            }
+            else if(source.mytag == "socketChannelAccepted") {                
+                e.accepted = Date.parse(dateText);                
+                
+                //data integrity check
+                if(validate(e)) {                    
+                    e.elapsedTime = (e.end - e.start)/1000;
+                    e.tableRow = [e.startText, e.elapsedTime];    
+                    data.push(e.tableRow);
+                }
+                
+                //reset temporary event
+                e = cleanup();
+            }
+            else alert('Error: unexpected order of the data!')
+        }
+
+        return data;
+    }
+
+    function drawBasic() {
+
+        var searchRequestUrl = "http://heapanalyzer.support.dkz.cloud:9200/filebeat-6.4.2-trace-2018.11.11/_search?"
+            +"q=mytag:socketChannelAccepted+mytag:startProcessNewConnection+mytag:endProcessNewConnection&size=10000"
+            +"&sort=offset:desc";
+
+        var jsonResponse = $.ajax({
+          url: searchRequestUrl,
+          dataType: "json",
+          async: false
+        }).responseText;
+
+        result = prepareData(jsonResponse);        
+        console.log(result);
+
+        var data = google.visualization.arrayToDataTable(result);
+
+        var options = {
+        title: 'Time spent for processing TCP connections',
+        chartArea: {width: '50%'},
+        hAxis: {
+          title: 'Total duration',
+          minValue: 0
+        },
+        vAxis: {
+          title: 'Time'
+        }
+        };
+
+        var chart = new google.visualization.BarChart(document.getElementById('chart_div'));
+
+        chart.draw(data, options);
+    }
+</script>
+</body>
+</html>
