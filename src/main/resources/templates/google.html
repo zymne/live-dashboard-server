@@ -2,23 +2,83 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <title>Title</title>    
     <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+        
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    <link rel="stylesheet" type="text/css" href="google.css">
+    <link href="./pace/themes/blue/pace-theme-minimal.css" rel="stylesheet" />
 </head>
-<body>
-<div id="chart_div"></div>
-<script type="text/javascript">
-    google.charts.load('current', {packages: ['corechart', 'bar']});
-    google.charts.setOnLoadCallback(drawBasic);
+<body>        
+    <script type="text/javascript">
+        window.paceOptions = {
+            startOnPageLoad: false,
+            ajax: {
+                trackMethods: ['POST']
+            }, // disabled
+            document: false, // disabled
+            eventLag: false, // disabled
+            elements: false
+        };
+    </script>
+    <script src="./pace/pace.js"></script>
+    <div id="toolbar">
+        <button onclick="drawBasic('now-15m', 'now')" type="button" class="btn btn-primary">Last 15 minutes</button>
+        <button onclick="drawBasic('now-1h', 'now')" type="button" class="btn btn-primary">Last 1 hour</button>
+        <button onclick="drawBasic('now-1d', 'now')" type="button" class="btn btn-primary">Last 24 hours</button>
+        <button onclick="drawBasic('now-3d', 'now')" type="button" class="btn btn-primary">Last 3 days</button>
+    </div>
+    <div id="chart_div"></div>
 
+<script type="text/javascript">
+    
+    var fromDate, toDate;
+
+    fromDate = "now-2d";
+    toDate = "now"
+    
+    function createQueryFilter(fromDate, toDate) {
+        return q = {
+            
+            sort: [
+                {"ts" : {"order": "desc" }},
+                {"offset" : { "order": "desc" }}
+            ],
+            
+            query: {
+                bool: {
+                    filter: [
+                        {
+                            terms: {
+                                mytag: ["socketChannelAccepted", "startProcessNewConnection", "endProcessNewConnection"]
+                            }
+                        },  
+                        {
+                            range: {
+                                ts: {
+                                    gt: fromDate,
+                                    lt: toDate
+                                }
+                            }
+                        }                    
+                    ]
+                }            
+            }
+        };
+    }
+    
+    google.charts.load('current', {packages: ['corechart', 'bar']});
+    
+    //google.charts.setOnLoadCallback(function() {});
+    google.charts.setOnLoadCallback(drawBasic);
+        
     function tcpChannelFormatHandler() {}
 
     function validate(data) {
         if(data.start == null || data.end == null || data.accepted == null) {
             return false;
         }
-
         return true;        
     }
 
@@ -29,9 +89,11 @@
             accepted: null,
             elapsedTime: null,
             startText: null,
+            endText: null,
             tableRow: []
         };        
     }
+    
     /*Данные приходят в обратном порядке - по убыванию, т.е. сначала самые новые*/
     /*Пример последовательности событий в потоке: 0.endProcessNewConnection, 1.startProcessNewConnection, 2.socketChannelAccepted*/
     function prepareData(jsonResponse) {
@@ -39,8 +101,7 @@
         var data = [];
         hits = jsonData.hits.hits;
         var j = 0;
-        var e = cleanup();
-        data.push(['Connection', 'Elapsed time, sec.']);
+        var e = cleanup();        
         for(var i = 0; i < hits.length; ++i) {
             var h = hits[i];            
             var source = h._source;                                    
@@ -49,10 +110,18 @@
 
             if(source.mytag == "startProcessNewConnection") {                
                 e.start = Date.parse(dateText);
-                e.startText = dateText.substring(11, 19);
+                //e.startText = dateText.substring(11, 19);
+                e.startText = dateText;
+                if(e.startText == '2018-11-14T12:17:02.217+03:00') {
+                    console.log('Error. Too large interval.');
+                    console.log('start:', e.startText);
+                    console.log('end:', e.endText);
+                }
+                    
             }
             else if(source.mytag == "endProcessNewConnection") {                
                 e.end = Date.parse(dateText);
+                e.endText = dateText;
             }
             else if(source.mytag == "socketChannelAccepted") {                
                 e.accepted = Date.parse(dateText);                
@@ -60,6 +129,12 @@
                 //data integrity check
                 if(validate(e)) {                    
                     e.elapsedTime = (e.end - e.start)/1000;
+                    
+                    if(e.elapsedTime < 0) {
+                        console.log('Error: unexpected order of the data!');
+                        //alert('Error: unexpected order of the data!')
+                    }
+                    
                     e.tableRow = [e.startText, e.elapsedTime];    
                     data.push(e.tableRow);
                 }
@@ -67,39 +142,57 @@
                 //reset temporary event
                 e = cleanup();
             }
-            else alert('Error: unexpected order of the data!')
+            else {
+                console.log('Error: unexpected order of the data!');
+                //alert('Error: unexpected order of the data!')
+            }
         }
 
         return data;
     }
 
-    function drawBasic() {
+    function drawBasic(fromDate = 'now-2d', toDate='now') {
 
-        var searchRequestUrl = "http://heapanalyzer.support.dkz.cloud:9200/filebeat-6.4.2-trace-2018.11.11/_search?"
-            +"q=mytag:socketChannelAccepted+mytag:startProcessNewConnection+mytag:endProcessNewConnection&size=10000"
-            +"&sort=offset:desc";
+        // var searchRequestUrl = "http://heapanalyzer.support.dkz.cloud:9200/filebeat-6.4.2-trace-2018.11.11/_search?"
+        //     +"q=mytag:socketChannelAccepted+mytag:startProcessNewConnection+mytag:endProcessNewConnection&size=10000"
+        //     +"&sort=offset:desc";
+        var searchRequestUrl = "http://heapanalyzer.support.dkz.cloud:9200/filebeat-6.4.2-trace-*/_search?size=10000";        
+        
+        Pace.restart();        
+        
+        q = createQueryFilter(fromDate, toDate);
 
+        queryString = JSON.stringify(q);
+                
         var jsonResponse = $.ajax({
           url: searchRequestUrl,
+          contentType: "application/json",
           dataType: "json",
+          data: queryString,
+          method: "POST",          
           async: false
         }).responseText;
 
-        result = prepareData(jsonResponse);        
+        result = prepareData(jsonResponse);                                
+        result.sort((a,b) => (a[1] < b[1]) ? 1 : ((b[1] < a[1]) ? -1 : 0));            
+        result.unshift(['Connection', 'Elapsed time, sec.']);
+        
         console.log(result);
 
+        result = result.slice(0, 10);
+        
         var data = google.visualization.arrayToDataTable(result);
 
         var options = {
-        title: 'Time spent for processing TCP connections',
-        chartArea: {width: '50%'},
-        hAxis: {
-          title: 'Total duration',
-          minValue: 0
-        },
-        vAxis: {
-          title: 'Time'
-        }
+            title: 'Time spent for processing TCP connections',
+            chartArea: {width: '50%'},
+            hAxis: {
+                title: 'Total duration',
+                minValue: 0
+            },
+            vAxis: {
+            title: 'Time'
+            }
         };
 
         var chart = new google.visualization.BarChart(document.getElementById('chart_div'));
